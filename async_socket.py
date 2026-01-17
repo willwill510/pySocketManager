@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import lzma
 
+DEFAULT_CLIENTPOOL = {}
 FORMAT = {
     'bytes': b'b',
     'string': b's',
@@ -35,6 +36,24 @@ def parse_metadata(data: bytes) -> dict:
     :rtype: dict[str, Any]
     '''
     return loads(data.decode())
+
+async def start_server(host: str, port: int, *args, **kwargs) -> 'AsyncSocket':
+    '''
+    Initalize, start, and return a AsyncSocket object as a server.
+    
+    :param host: A valid internet protocol address used for connection and hosting.
+    :type host: str
+    :param port: A integer between 0 an 65535 used for connection and hosting.
+    :type port: int
+    :param args: Arguments which will be directly passed to the AsyncSocket object at initalization.
+    :param kwargs: Keyword arguments which will be directly passed to the AsyncSocket object at initalization.
+    :return: A AsyncSocket object configured to be a server and ready to be deployed.
+    :rtype: AsyncSocket
+    '''
+    server = AsyncSocket(host, port, *args, **kwargs)
+    await server.start()
+    
+    return server
 
 class Sender():
     '''
