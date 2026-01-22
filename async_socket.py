@@ -2,7 +2,7 @@
 A rubust, higher level, pure python asynchronous socket handler including various helper functions, a custom protocol, integrated LZMA compression, hash verification, and multiple clientpool functionality.
 '''
 
-from typing import Callable, NoReturn, Optional, Dict, BinaryIO, Any
+from typing import Callable, NoReturn, Optional, BinaryIO, Any
 from json import dumps, loads
 from os import path, remove
 import hashlib
@@ -417,6 +417,7 @@ class AsyncSocket():
         :param writer: An asyncio stream writer which is used to asynchronously send data through a socket connection. If set to None a new asyncio stream writer will be initalized. This attribute almost never needs to be set manually. Default is None
         :type writer: Optional[asyncio.StreamWriter]
         '''
+        self.default_clientpool: dict[str, 'AsyncSocket'] = {}
         self.host = host
         self.port = port
         self.label = label
@@ -550,19 +551,20 @@ class AsyncSocket():
         self._server = None
         self._accept_queue = None
 
-    async def accept(self, metadata: bytes, clientpool: Optional[Dict[str, 'AsyncSocket']] = None, timeout: Optional[float] = None) -> 'AsyncSocket':
+    async def accept(self, metadata: bytes, clientpool: dict[str, 'AsyncSocket'] = DEFAULT_CLIENTPOOL, timeout: Optional[float] = None) -> 'AsyncSocket':
         '''
         Accepts a client connection and optionally enters it into a specified clientpool.
         
         :param metadata: Custom data describing your data which is sent with the header before the payload.
         :type metadata: bytes
-        :param clientpool: An optional pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object. When accepted, if the clientpool is not None then the client will be put into the supplied clientpool.
+        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object. When accepted, the client will be put into the supplied clientpool. Default is DEFAULT_CLIENTPOOL.
         :type clientpool: Optional[Dict[str, 'AsyncSocket']]
         :param timeout: A timeout in seconds which will raise a TimeoutError if the wait is longer than specified. Set to None for no timeout. Default is None.
         :type timeout: Optional[float]
         :return: Returns the AsyncSocket associated with the accepted client.
         :rtype: AsyncSocket
-        :raises RuntimeError: 
+        :raises RuntimeError: If AsyncSocket object has not been started as a server.
+        :raises ConnectionError: If the connection handshake fails.
         '''
         if self._accept_queue is None:
             raise RuntimeError('Server not started! (call start())')
@@ -581,19 +583,21 @@ class AsyncSocket():
 
         if clientpool is not None:
             clientpool[client.label] = client
+        else:
+            self.default_clientpool[client.label] = client
 
         return client
 
-    async def broadcast(self, clientpool: Dict[str, 'AsyncSocket'], metadata: bytes, data: bytes, timeout: float = 4) -> None:
+    async def broadcast(self, metadata: bytes, data: bytes, clientpool: dict[str, 'AsyncSocket'] = DEFAULT_CLIENTPOOL, timeout: float = 4) -> None:
         '''
         Broadcast a message to every client in a given clientpool.
         
-        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object, which will be looped through, sending the same message to each.
-        :type clientpool: Dict[str, 'AsyncSocket']
         :param metadata: Custom data describing your data which is sent with the header before the payload.
         :type metadata: bytes
         :param data: The data to send through the socket connection, can be a string, bytes, or binary file object.
         :type data: bytes
+        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object, which will be looped through, sending the same message to each. Default is DEFAULT_CLIENTPOOL.
+        :type clientpool: Dict[str, 'AsyncSocket']
         :param timeout: A timeout in seconds which will raise a TimeoutError if the wait is longer than specified. Set to None for no timeout. Default is 4.
         :type timeout: float
         '''
@@ -620,14 +624,14 @@ class AsyncSocket():
             request: Request = await self._recv_request_queue.get() # type: ignore
             await request.run()
 
-    async def accept_loop(self, clientpool: Dict[str, 'AsyncSocket'], metadata: bytes, timeout: Optional[float] = None) -> NoReturn:
+    async def accept_loop(self, metadata: bytes, clientpool: dict[str, 'AsyncSocket'] = DEFAULT_CLIENTPOOL, timeout: Optional[float] = None) -> NoReturn:
         '''
         A loop which constantly accepts new connections to a clientpool, meant to be used in a seperate task from the main event loop.
         
-        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object. When accepted the client will be put into the supplied clientpool.
-        :type clientpool: Dict[str, 'AsyncSocket']
         :param metadata: Custom data describing your data which is sent with the header before the payload.
         :type metadata: bytes
+        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object. When accepted the client will be put into the supplied clientpool. Default is DEFAULT_CLIENTPOOL.
+        :type clientpool: Dict[str, 'AsyncSocket']
         :param timeout: A timeout in seconds which will raise a TimeoutError if the wait is longer than specified. Set to None for no timeout. Default is None.
         :type timeout: Optional[float]
         '''
@@ -639,21 +643,21 @@ class AsyncSocket():
             except Exception:
                 continue
 
-    async def ping_loop(self, clientpool: Dict[str, 'AsyncSocket'], metadata: bytes, interval: int = 30, data: bytes = b'ping') -> NoReturn:
+    async def ping_loop(self, metadata: bytes, clientpool: dict[str, 'AsyncSocket'] = DEFAULT_CLIENTPOOL, interval: int = 30, data: bytes = b'ping') -> NoReturn:
         '''
         Docstring for ping_loop
         
-        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object, which will be looped through, pinging each to check connection.
-        :type clientpool: Dict[str, 'AsyncSocket']
         :param metadata: Custom data describing your data which is sent with the header before the payload.
         :type metadata: bytes
+        :param clientpool: A pool of several clients grouped together in a dictionary where each key is the client's label and the value is the client's AsyncSocket object, which will be looped through, pinging each to check connection. Default is DEFAULT_CLIENTPOOL.
+        :type clientpool: Dict[str, 'AsyncSocket']
         :param interval: The interval in seconds between pings. Default is 30.
         :type interval: int
         :param data: The dummy data to send through the socket connection as a ping. Default is "ping".
         :type data: bytes
         '''
         while True:
-            await self.broadcast(clientpool, metadata, data)
+            await self.broadcast(metadata, data, clientpool)
             await asyncio.sleep(interval)
 
     def is_running(self) -> bool:
